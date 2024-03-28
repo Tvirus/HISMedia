@@ -556,14 +556,14 @@ static const audio_stream_cfg_t audio_stream_cfg[] =
 
 
 /*************************************************
-    Signal Frame Config
+    Single Frame Config
 **************************************************/
-static const signal_frame_cfg_t signal_frame_cfg[] =
+static const single_frame_cfg_t single_frame_cfg[] =
 {
-    /*        signal_frame_id              mod_id                    dev_id  chn  port */
-    {SIGNAL_FRAME_ID_RGB_MAIN, E_MI_MODULE_ID_SCL, MI_SCL_DEV_ISP_REALTIME0,   0,    2  }
+    /*        single_frame_id              mod_id                    dev_id  chn  port */
+    {SINGLE_FRAME_ID_RGB_MAIN, E_MI_MODULE_ID_SCL, MI_SCL_DEV_ISP_REALTIME0,   0,    2  }
 };
-#define SIGNAL_FRAME_CFG_COUNT (sizeof(signal_frame_cfg) / sizeof(signal_frame_cfg[0]))
+#define SINGLE_FRAME_CFG_COUNT (sizeof(single_frame_cfg) / sizeof(single_frame_cfg[0]))
 
 
 

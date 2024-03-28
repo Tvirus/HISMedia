@@ -241,16 +241,16 @@ typedef struct
 
 
 /*************************************************
-    Signal Frame Config
+    Single Frame Config
 **************************************************/
 typedef struct
 {
-    signal_frame_id_t frame_id;
+    single_frame_id_t frame_id;
     MI_ModuleId_e mod_id;
     MI_U32 dev_id;
     MI_U32 chn_id;
     MI_U32 port_id;
-}signal_frame_cfg_t;
+}single_frame_cfg_t;
 
 
 /*************************************************
@@ -1920,7 +1920,7 @@ int hism_stop_isp_tool(void)
 
 
 /* 返回的buf是MIU物理地址对应的虚拟地址 */
-int hism_get_signal_frame(signal_frame_id_t id, signal_frame_t *frame)
+int hism_get_single_frame(single_frame_id_t id, single_frame_t *frame)
 {
     MI_SYS_ChnPort_t chn_port;
     MI_SYS_BufInfo_t info;
@@ -1931,20 +1931,20 @@ int hism_get_signal_frame(signal_frame_id_t id, signal_frame_t *frame)
     if (NULL == frame)
         return -1;
 
-    for (i = 0; i < SIGNAL_FRAME_CFG_COUNT; i++)
+    for (i = 0; i < SINGLE_FRAME_CFG_COUNT; i++)
     {
-        if (id != signal_frame_cfg[i].frame_id)
+        if (id != single_frame_cfg[i].frame_id)
             continue;
 
-        chn_port.eModId    = signal_frame_cfg[i].mod_id;
-        chn_port.u32DevId  = signal_frame_cfg[i].dev_id;
-        chn_port.u32ChnId  = signal_frame_cfg[i].chn_id;
-        chn_port.u32PortId = signal_frame_cfg[i].port_id;
+        chn_port.eModId    = single_frame_cfg[i].mod_id;
+        chn_port.u32DevId  = single_frame_cfg[i].dev_id;
+        chn_port.u32ChnId  = single_frame_cfg[i].chn_id;
+        chn_port.u32PortId = single_frame_cfg[i].port_id;
         break;
     }
-    if (SIGNAL_FRAME_CFG_COUNT <= i)
+    if (SINGLE_FRAME_CFG_COUNT <= i)
     {
-        ERROR("signal frame[%d] is not configured !", id);
+        ERROR("single frame[%d] is not configured !", id);
         return -1;
     }
 
@@ -1970,7 +1970,7 @@ int hism_get_signal_frame(signal_frame_id_t id, signal_frame_t *frame)
 }
 
 
-int hism_resize_frame(const signal_frame_t *in_frame, resize_t *resize, signal_frame_t *out_frame)
+int hism_resize_frame(const single_frame_t *in_frame, resize_t *resize, single_frame_t *out_frame)
 {
     MI_SYS_WindowRect_t rect;
     MI_SCL_DirectBuf_t src;
@@ -2063,7 +2063,7 @@ EXIT:
 
 static pthread_mutex_t jpeg_mutex = PTHREAD_MUTEX_INITIALIZER;
 /* crop会返回实际对齐后的区域，只有裁剪没有缩放 */
-int hism_encode_jpeg(const signal_frame_t *frame, resize_t *crop, unsigned char *buf, unsigned int size)
+int hism_encode_jpeg(const single_frame_t *frame, resize_t *crop, unsigned char *buf, unsigned int size)
 {
     MI_VENC_CropCfg_t crop_cfg;
     MI_VENC_RecvPicParam_t recv_param;
@@ -2236,7 +2236,7 @@ EXIT:
 }
 
 
-int hism_release_signal_frame(signal_frame_t *frame)
+int hism_release_single_frame(single_frame_t *frame)
 {
     MI_PHY phy_addr;
     MI_S32 ret;

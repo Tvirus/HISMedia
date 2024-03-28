@@ -615,14 +615,14 @@ static audio_play_cfg_t audio_play_cfg =
 
 
 /*************************************************
-    Signal Frame Config
+    Single Frame Config
 **************************************************/
-static const signal_frame_cfg_t signal_frame_cfg[] =
+static const single_frame_cfg_t single_frame_cfg[] =
 {
-    /*        signal_frame_id  width  height  chn */
-    {SIGNAL_FRAME_ID_RGB_MAIN,  2560,   1440,   0  }
+    /*        single_frame_id  width  height  chn */
+    {SINGLE_FRAME_ID_RGB_MAIN,  2560,   1440,   0  }
 };
-#define SIGNAL_FRAME_CFG_COUNT (sizeof(signal_frame_cfg) / sizeof(signal_frame_cfg[0]))
+#define SINGLE_FRAME_CFG_COUNT (sizeof(single_frame_cfg) / sizeof(single_frame_cfg[0]))
 
 
 

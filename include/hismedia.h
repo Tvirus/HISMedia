@@ -7,12 +7,12 @@
 
 typedef enum
 {
-    SIGNAL_FRAME_ID_RGB_MAIN = 0,
-    SIGNAL_FRAME_ID_RGB_SUB,
-    SIGNAL_FRAME_ID_IR_MAIN,
-    SIGNAL_FRAME_ID_IR_SUB,
-    SIGNAL_FRAME_ID_MAX
-}signal_frame_id_t;
+    SINGLE_FRAME_ID_RGB_MAIN = 0,
+    SINGLE_FRAME_ID_RGB_SUB,
+    SINGLE_FRAME_ID_IR_MAIN,
+    SINGLE_FRAME_ID_IR_SUB,
+    SINGLE_FRAME_ID_MAX
+}single_frame_id_t;
 typedef struct
 {
     unsigned long long pts;
@@ -22,7 +22,7 @@ typedef struct
     unsigned int size;
     unsigned char *buf;
     void *handle; /* 同时指示buf地址是否是从SDK获取的 */
-}signal_frame_t;
+}single_frame_t;
 
 
 typedef enum
@@ -158,12 +158,12 @@ extern int hism_play_audio_frame(frame_t *frame);
 extern int hism_start_isp_tool(void);
 extern int hism_stop_isp_tool(void);
 
-extern int hism_get_signal_frame(signal_frame_id_t id, signal_frame_t *frame);
+extern int hism_get_single_frame(single_frame_id_t id, single_frame_t *frame);
 /* resize会返回实际对齐后的尺寸 */
-extern int hism_resize_frame(const signal_frame_t *in_frame, resize_t *resize, signal_frame_t *out_frame);
+extern int hism_resize_frame(const single_frame_t *in_frame, resize_t *resize, single_frame_t *out_frame);
 /* crop会返回实际对齐后的区域，只有裁剪没有缩放 */
-extern int hism_encode_jpeg(const signal_frame_t *frame, resize_t *crop, unsigned char *buf, unsigned int size);
-extern int hism_release_signal_frame(signal_frame_t *frame);
+extern int hism_encode_jpeg(const single_frame_t *frame, resize_t *crop, unsigned char *buf, unsigned int size);
+extern int hism_release_single_frame(single_frame_t *frame);
 
 extern int hism_get_osd_info(stream_id_t stream_id, osd_id_t osd_id, osd_info_t *info);
 extern int hism_write_osd(stream_id_t stream_id, osd_id_t osd_id, unsigned char *buf);
