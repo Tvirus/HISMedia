@@ -534,8 +534,8 @@ static bind_cfg_t bind_cfg[] =
 **************************************************/
 static const video_stream_cfg_t video_stream_cfg[] =
 {
-    /*  stream_id              format width height fps                   venc_devid chn */
-    {{{0, 0, 0, 0}, VIDEO_FORMAT_H264, 2560,  1440, 25}, MI_VENC_DEV_ID_H264_H265_0,  0  }
+    /*  stream_id              format width height fps   cache_id                  venc_devid chn */
+    {{{0, 0, 0, 0}, VIDEO_FORMAT_H264, 2560,  1440, 25},       -1, MI_VENC_DEV_ID_H264_H265_0,  0  }
 };
 #define VIDEO_STREAM_CFG_COUNT (sizeof(video_stream_cfg) / sizeof(video_stream_cfg[0]))
 
@@ -547,8 +547,8 @@ static const video_stream_cfg_t video_stream_cfg[] =
 **************************************************/
 static const audio_stream_cfg_t audio_stream_cfg[] =
 {
-    /*  stream_id              format  chns  rate        dev_id  grp_id */
-    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCMA,    1, 8000}, MI_AI_DEV_1,      0  }
+    /*  stream_id              format  chns  rate  cache_id       dev_id  grp_id */
+    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCMA,    1, 8000},      -1, MI_AI_DEV_1,      0  }
 };
 #define AUDIO_STREAM_CFG_COUNT (sizeof(audio_stream_cfg) / sizeof(audio_stream_cfg[0]))
 

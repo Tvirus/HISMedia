@@ -579,10 +579,10 @@ static bind_cfg_t bind_cfg[] =
 **************************************************/
 static video_stream_cfg_t video_stream_cfg[] =
 {
-    /*  stream_id              format  width  height  fps   enc_chn */
-    {{{0, 0, 0, 0}, VIDEO_FORMAT_H265,  2560,   1440,  25},       0  },
-    {{{0, 0, 0, 1}, VIDEO_FORMAT_H265,  1280,    720,  25},       1  },
-    {{{0, 0, 0, 2}, VIDEO_FORMAT_H265,   640,    360,  25},       2  }
+    /*  stream_id              format  width  height  fps   cache_id  enc_chn */
+    {{{0, 0, 0, 0}, VIDEO_FORMAT_H265,  2560,   1440,  25},       -1,       0  },
+    {{{0, 0, 0, 1}, VIDEO_FORMAT_H265,  1280,    720,  25},       -1,       1  },
+    {{{0, 0, 0, 2}, VIDEO_FORMAT_H265,   640,    360,  25},       -1,       2  }
 };
 #define VIDEO_STREAM_CFG_COUNT (sizeof(video_stream_cfg) / sizeof(video_stream_cfg[0]))
 
@@ -594,8 +594,8 @@ static video_stream_cfg_t video_stream_cfg[] =
 **************************************************/
 static audio_stream_cfg_t audio_stream_cfg[] =
 {
-    /*  stream_id             format  chns  rate   dev_id  chn_id */
-    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCM,    1, 8000},      1,      0  }
+    /*  stream_id             format  chns  rate   cache_id  dev_id  chn_id */
+    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCM,    1, 8000},       -1,      1,      0  }
 };
 #define AUDIO_STREAM_CFG_COUNT (sizeof(audio_stream_cfg) / sizeof(audio_stream_cfg[0]))
 
