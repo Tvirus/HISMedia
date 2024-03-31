@@ -291,7 +291,7 @@ static isp_osd_region_cfg_t isp_osd_region_cfg[0] =
 static osd_grp_cfg_t osd_grp_cfg[] =
 {
     {
-        STREAM_ID_V_RGB_MAIN,  /* stream_id         */
+        {0, 0, 0, 0},          /* stream_id         */
         0,                     /* grp               */
         10,                    /* rect_rgn_cnt      */
         30,                    /* slash_rgn_cnt     */
@@ -311,7 +311,7 @@ static osd_grp_cfg_t osd_grp_cfg[] =
         }
     },
     {
-        STREAM_ID_V_RGB_SUB1,  /* stream_id         */
+        {0, 0, 0, 1},          /* stream_id         */
         1,                     /* grp               */
         10,                    /* rect_rgn_cnt      */
         30,                    /* slash_rgn_cnt     */
@@ -331,7 +331,7 @@ static osd_grp_cfg_t osd_grp_cfg[] =
         }
     },
     {
-        STREAM_ID_V_RGB_SUB2,  /* stream_id         */
+        {0, 0, 0, 2},          /* stream_id         */
         2,                     /* grp               */
         10,                    /* rect_rgn_cnt      */
         30,                    /* slash_rgn_cnt     */
@@ -356,7 +356,7 @@ static osd_grp_cfg_t osd_grp_cfg[] =
 static osd_region_cfg_t osd_region_cfg[] =
 {
     {
-        STREAM_ID_V_RGB_MAIN,       /* stream_id         */
+        {0, 0, 0, 0},               /* stream_id         */
         0,                          /* grp               */
         OSD_ID_TIME,                /* osd_id            */
         320,                        /* width             */
@@ -400,7 +400,7 @@ static osd_region_cfg_t osd_region_cfg[] =
         }
     },
     {
-        STREAM_ID_V_RGB_SUB1,       /* stream_id         */
+        {0, 0, 0, 1},               /* stream_id         */
         1,                          /* grp               */
         OSD_ID_TIME,                /* osd_id            */
         320,                        /* width             */
@@ -444,7 +444,7 @@ static osd_region_cfg_t osd_region_cfg[] =
         }
     },
     {
-        STREAM_ID_V_RGB_SUB2,       /* stream_id         */
+        {0, 0, 0, 2},               /* stream_id         */
         2,                          /* grp               */
         OSD_ID_TIME,                /* osd_id            */
         320,                        /* width             */
@@ -577,12 +577,12 @@ static bind_cfg_t bind_cfg[] =
 /*************************************************
     Video Stream Config
 **************************************************/
-static const video_stream_cfg_t video_stream_cfg[] =
+static video_stream_cfg_t video_stream_cfg[] =
 {
-    /*           stream_id             format  width  height  fps   enc_chn */
-    {{STREAM_ID_V_RGB_MAIN, VIDEO_FORMAT_H265,  2560,   1440,  25},       0  },
-    {{STREAM_ID_V_RGB_SUB1, VIDEO_FORMAT_H265,  1280,    720,  25},       1  },
-    {{STREAM_ID_V_RGB_SUB2, VIDEO_FORMAT_H265,   640,    360,  25},       2  }
+    /*  stream_id              format  width  height  fps   enc_chn */
+    {{{0, 0, 0, 0}, VIDEO_FORMAT_H265,  2560,   1440,  25},       0  },
+    {{{0, 0, 0, 1}, VIDEO_FORMAT_H265,  1280,    720,  25},       1  },
+    {{{0, 0, 0, 2}, VIDEO_FORMAT_H265,   640,    360,  25},       2  }
 };
 #define VIDEO_STREAM_CFG_COUNT (sizeof(video_stream_cfg) / sizeof(video_stream_cfg[0]))
 
@@ -592,12 +592,15 @@ static const video_stream_cfg_t video_stream_cfg[] =
 /*************************************************
     Audio Stream Config
 **************************************************/
-static const audio_stream_cfg_t audio_stream_cfg[] =
+static audio_stream_cfg_t audio_stream_cfg[] =
 {
-    /*       stream_id            format  chns  rate   dev_id  chn_id */
-    {{STREAM_ID_A_MAIN, AUDIO_FORMAT_PCM,    1, 8000},      1,      0  }
+    /*  stream_id             format  chns  rate   dev_id  chn_id */
+    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCM,    1, 8000},      1,      0  }
 };
 #define AUDIO_STREAM_CFG_COUNT (sizeof(audio_stream_cfg) / sizeof(audio_stream_cfg[0]))
+
+
+#define STREAM_COUNT (VIDEO_STREAM_CFG_COUNT + AUDIO_STREAM_CFG_COUNT)
 
 
 
@@ -619,8 +622,8 @@ static audio_play_cfg_t audio_play_cfg =
 **************************************************/
 static const single_frame_cfg_t single_frame_cfg[] =
 {
-    /*        single_frame_id  width  height  chn */
-    {SINGLE_FRAME_ID_RGB_MAIN,  2560,   1440,   0  }
+    /* stream_id   width  height  chn */
+    {{0, 0, 0, 0},  2560,   1440,   0  }
 };
 #define SINGLE_FRAME_CFG_COUNT (sizeof(single_frame_cfg) / sizeof(single_frame_cfg[0]))
 

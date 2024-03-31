@@ -5,14 +5,6 @@
 #include "hismedia_cache.h"
 
 
-typedef enum
-{
-    SINGLE_FRAME_ID_RGB_MAIN = 0,
-    SINGLE_FRAME_ID_RGB_SUB,
-    SINGLE_FRAME_ID_IR_MAIN,
-    SINGLE_FRAME_ID_IR_SUB,
-    SINGLE_FRAME_ID_MAX
-}single_frame_id_t;
 typedef struct
 {
     unsigned long long pts;
@@ -158,7 +150,7 @@ extern int hism_play_audio_frame(frame_t *frame);
 extern int hism_start_isp_tool(void);
 extern int hism_stop_isp_tool(void);
 
-extern int hism_get_single_frame(single_frame_id_t id, single_frame_t *frame);
+extern int hism_get_single_frame(stream_id_t id, single_frame_t *frame);
 /* resize会返回实际对齐后的尺寸 */
 extern int hism_resize_frame(const single_frame_t *in_frame, resize_t *resize, single_frame_t *out_frame);
 /* crop会返回实际对齐后的区域，只有裁剪没有缩放 */

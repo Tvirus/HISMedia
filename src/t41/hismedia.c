@@ -192,6 +192,7 @@ typedef struct
 typedef struct
 {
     video_stream_info_t stream_info;
+    int cache_id;
     int enc_chnid;
 }video_stream_cfg_t;
 
@@ -202,6 +203,7 @@ typedef struct
 typedef struct
 {
     audio_stream_info_t stream_info;
+    int cache_id;
     int dev_id;
     int chn_id;
 }audio_stream_cfg_t;
@@ -226,7 +228,7 @@ typedef struct
 **************************************************/
 typedef struct
 {
-    single_frame_id_t frame_id;
+    stream_id_t stream_id;
     int width;
     int height;
     int chn_id;
@@ -247,6 +249,7 @@ typedef struct
 
 typedef struct
 {
+    stream_id_t stream_id;
     unsigned char should_run;
     unsigned char is_running;
 }stream_state_t;
@@ -259,13 +262,13 @@ typedef struct
 
 
 static pthread_mutex_t media_mutex = PTHREAD_MUTEX_INITIALIZER;
-static stream_state_t stream_state_list[STREAM_ID_MAX];
+static stream_state_t stream_state_list[STREAM_COUNT];
 #define MAX_ALGO_CB 7
 static algo_cb_info_t algo_cb_list[MAX_ALGO_CB];
 static unsigned char ivs_should_run = 0;
 
-static unsigned char media_inited = 0;
-static unsigned char media_debug = 1;
+static unsigned char media_inited = 0; /* -1:退出失败，0:未初始化，1:已初始化 */
+unsigned char media_debug = 1;
 
 
 void hism_set_debug(unsigned char level)
@@ -1395,11 +1398,14 @@ static int unbind(void)
 
 static void* get_video_stream(void *arg)
 {
-    stream_id_t stream_id = (stream_id_t)arg;
+    video_stream_cfg_t *stream_cfg = (video_stream_cfg_t *)arg;
+    stream_state_t *stream_state;
+    stream_id_t stream_id;
     video_format_t format;
     unsigned int width;
     unsigned int height;
     unsigned int fps;
+    int cache_id;
     int chnid;
     IMPEncoderStream stream;
     frame_t *frame;
@@ -1411,37 +1417,41 @@ static void* get_video_stream(void *arg)
     pthread_detach(pthread_self());
     prctl(PR_SET_NAME, (unsigned long)"get_video_stream", 0, 0, 0);
 
+    stream_id = stream_cfg->stream_info.stream_id;
+    format    = stream_cfg->stream_info.format;
+    width     = stream_cfg->stream_info.width;
+    height    = stream_cfg->stream_info.height;
+    fps       = stream_cfg->stream_info.fps;
+    cache_id  = stream_cfg->cache_id;
+    chnid     = stream_cfg->enc_chnid;
+
     for (i = 0; i < VIDEO_STREAM_CFG_COUNT; i++)
     {
-        if (stream_id == video_stream_cfg[i].stream_info.stream_id)
-        {
-            format = video_stream_cfg[i].stream_info.format;
-            width  = video_stream_cfg[i].stream_info.width;
-            height = video_stream_cfg[i].stream_info.height;
-            fps    = video_stream_cfg[i].stream_info.fps;
-            chnid  = video_stream_cfg[i].enc_chnid;
+        if (!memcmp(&stream_id, &stream_state_list[i].stream_id, sizeof(stream_id_t)))
             break;
-        }
     }
+    stream_state = &stream_state_list[i];
 
-    while (stream_state_list[stream_id].should_run)
+    while (stream_state->should_run)
     {
         if (0 > IMP_Encoder_PollingStream(chnid, 1000))
         {
-            DEBUG("IMP_Encoder_PollingStream timeout, stream_id[%d] chn[%u] !", stream_id, chnid);
+            DEBUG("IMP_Encoder_PollingStream timeout, stream_id[%u,%u,%u] chn[%u] !",
+                   stream_id.type, stream_id.major, stream_id.minor, chnid);
             continue;
         }
         if (IMP_Encoder_GetStream(chnid, &stream, 0))
         {
-            DEBUG("IMP_Encoder_GetStream failed, stream_id[%d] chn[%u] !", stream_id, chnid);
+            DEBUG("IMP_Encoder_GetStream failed, stream_id[%u,%u,%u] chn[%u] !",
+                   stream_id.type, stream_id.major, stream_id.minor, chnid);
             continue;
         }
         if (0 == stream.packCount)
         {
             if (IMP_Encoder_ReleaseStream(chnid, &stream))
             {
-                ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%d] chn[%u] !",
-                       stream_id, chnid);
+                ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%u,%u,%u] chn[%u] !",
+                       stream_id.type, stream_id.major, stream_id.minor, chnid);
             }
             continue;
         }
@@ -1457,13 +1467,14 @@ static void* get_video_stream(void *arg)
             ERROR("hism_alloc_frame(%u) failed !", total_len);
             if (IMP_Encoder_ReleaseStream(chnid, &stream))
             {
-                ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%d] chn[%u] !",
-                       stream_id, chnid);
+                ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%u,%u,%u] chn[%u] !",
+                       stream_id.type, stream_id.major, stream_id.minor, chnid);
             }
             continue;
         }
 
         frame->stream_id = stream_id;
+        frame->cache_id = cache_id;
         frame->pts  = stream.pack[0].timestamp;
         frame->video_info.format = format;
         frame->video_info.fps    = fps;
@@ -1492,24 +1503,28 @@ static void* get_video_stream(void *arg)
         }
 
         if (hism_put_stream_frame(frame))
-            free(frame);
+            hism_free_frame(frame);
 
         if (IMP_Encoder_ReleaseStream(chnid, &stream))
         {
-            ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%d] chn[%u] !", stream_id, chnid);
+            ERROR("IMP_Encoder_ReleaseStream failed, stream_id[%u,%u,%u] chn[%u] !",
+                   stream_id.type, stream_id.major, stream_id.minor, chnid);
         }
     }
 
-    stream_state_list[stream_id].is_running = 0;
+    stream_state->is_running = 0;
 
     return NULL;
 }
 static void* get_audio_stream(void *arg)
 {
-    stream_id_t stream_id = (stream_id_t)arg;
+    audio_stream_cfg_t *stream_cfg = (audio_stream_cfg_t *)arg;
+    stream_state_t *stream_state;
+    stream_id_t stream_id;
     audio_format_t format;
     unsigned int channels;
     unsigned int sample_rate;
+    int cache_id;
     int dev_id;
     int chn_id;
     IMPAudioFrame data;
@@ -1520,20 +1535,22 @@ static void* get_audio_stream(void *arg)
     pthread_detach(pthread_self());
     prctl(PR_SET_NAME, (unsigned long)"get_audio_stream", 0, 0, 0);
 
-    for (i = 0; i < AUDIO_STREAM_CFG_COUNT; i++)
-    {
-        if (stream_id == audio_stream_cfg[i].stream_info.stream_id)
-        {
-            format      = audio_stream_cfg[i].stream_info.format;
-            channels    = audio_stream_cfg[i].stream_info.channels;
-            sample_rate = audio_stream_cfg[i].stream_info.sample_rate;
-            dev_id      = audio_stream_cfg[i].dev_id;
-            chn_id      = audio_stream_cfg[i].chn_id;
-            break;
-        }
-    }
+    stream_id   = stream_cfg->stream_info.stream_id;
+    format      = stream_cfg->stream_info.format;
+    channels    = stream_cfg->stream_info.channels;
+    sample_rate = stream_cfg->stream_info.sample_rate;
+    cache_id    = stream_cfg->cache_id;
+    dev_id      = stream_cfg->dev_id;
+    chn_id      = stream_cfg->chn_id;
 
-    while (stream_state_list[stream_id].should_run)
+    for (i = 0; i < STREAM_COUNT; i++)
+    {
+        if (memcmp(&stream_id, &stream_state_list[i].stream_id, sizeof(stream_id_t)))
+            break;
+    }
+    stream_state = &stream_state_list[i];
+
+    while (stream_state->should_run)
     {
         if (IMP_AI_PollingFrame(dev_id, chn_id, 1000))
             continue;
@@ -1552,6 +1569,7 @@ static void* get_audio_stream(void *arg)
         }
 
         frame->stream_id = stream_id;
+        frame->cache_id = cache_id;
         frame->pts = data.timeStamp;
         frame->audio_info.format = format;
         frame->audio_info.channels = channels;
@@ -1559,33 +1577,59 @@ static void* get_audio_stream(void *arg)
         frame->size = data.len;
         memcpy(frame->buf, data.virAddr, frame->size);
         if (hism_put_stream_frame(frame))
-            free(frame);
+            hism_free_frame(frame);
 
         IMP_AI_ReleaseFrame(dev_id, chn_id, &data);
     }
 
-    stream_state_list[stream_id].is_running = 0;
+    stream_state->is_running = 0;
     return NULL;
 }
 
 
 int hism_init(void)
 {
+    int i, j;
+
+
     pthread_mutex_lock(&media_mutex);
-    if (media_inited)
+
+    if (0 != media_inited)
     {
         pthread_mutex_unlock(&media_mutex);
-        return 0;
+        return -1;
     }
 
-    memset(algo_cb_list, 0, sizeof(algo_cb_list));
     memset(stream_state_list, 0, sizeof(stream_state_list));
+    memset(algo_cb_list, 0, sizeof(algo_cb_list));
+    i = 0;
+    for (j = 0; j < VIDEO_STREAM_CFG_COUNT; j++)
+    {
+        stream_state_list[i].stream_id = video_stream_cfg[j].stream_info.stream_id;
+        i++;
+    }
+    for (j = 0; j < AUDIO_STREAM_CFG_COUNT; j++)
+    {
+        stream_state_list[i].stream_id = audio_stream_cfg[j].stream_info.stream_id;
+        i++;
+    }
 
-    if (hism_cache_init())
+    if (hism_cache_init(STREAM_COUNT))
         goto EXIT;
-
+    for (i = 0; i < VIDEO_STREAM_CFG_COUNT; i++)
+    {
+        video_stream_cfg[i].cache_id = hism_register_stream_id(video_stream_cfg[i].stream_info.stream_id);
+        if (0 > video_stream_cfg[i].cache_id)
+            goto EXIT_CACHE;
+    }
+    for (i = 0; i < AUDIO_STREAM_CFG_COUNT; i++)
+    {
+        audio_stream_cfg[i].cache_id = hism_register_stream_id(audio_stream_cfg[i].stream_info.stream_id);
+        if (0 > audio_stream_cfg[i].cache_id)
+            goto EXIT_CACHE;
+    }
     if (init_sys())
-        goto EXIT;
+        goto EXIT_CACHE;
     if (init_isp())
         goto EXIT_SYS;
     if (init_framesource())
@@ -1627,6 +1671,8 @@ EXIT_ISP:
     deinit_isp();
 EXIT_SYS:
     deinit_sys();
+EXIT_CACHE:
+    hism_cache_exit();
 EXIT:
     pthread_mutex_unlock(&media_mutex);
     return -1;
@@ -1634,33 +1680,36 @@ EXIT:
 int hism_exit(void)
 {
     int i, j;
+    int ret = 0;
+
 
     pthread_mutex_lock(&media_mutex);
-    if (0 == media_inited)
+    if (0 >= media_inited)
     {
+        ret = media_inited;
         pthread_mutex_unlock(&media_mutex);
-        return 0;
+        return ret;
     }
-    media_inited = 0;
 
-    for (i = 0; i < STREAM_ID_MAX; i++)
+    for (i = 0; i < STREAM_COUNT; i++)
     {
         stream_state_list[i].should_run = 0;
     }
     for (i = 0; i < 70; i++)
     {
         usleep(40 * 1000);
-        for (j = 0; j < STREAM_ID_MAX; j++)
+        for (j = 0; j < STREAM_COUNT; j++)
         {
             if (stream_state_list[j].is_running)
                 break;
         }
-        if (STREAM_ID_MAX <= j)
+        if (STREAM_COUNT <= j)
             break;
     }
     if (70 <= i)
     {
         ERROR("stream exit timeout !");
+        ret = -1;
     }
 
 
@@ -1673,101 +1722,150 @@ int hism_exit(void)
     deinit_framesource();
     deinit_isp();
     deinit_sys();
+    hism_cache_exit();
+
+    if (ret)
+        media_inited = -1;
+    else
+        media_inited = 0;
 
     pthread_mutex_unlock(&media_mutex);
 
-    return 0;
+    return ret;
 }
 
 
 static int start_video_stream(stream_id_t id)
 {
+    video_stream_cfg_t *stream_cfg;
     pthread_t tid;
     int i;
 
 
     for (i = 0; i < VIDEO_STREAM_CFG_COUNT; i++)
     {
-        if (id == video_stream_cfg[i].stream_info.stream_id)
+        if (!memcmp(&id, &video_stream_cfg[i].stream_info.stream_id, sizeof(stream_id_t)))
             break;
     }
     if (VIDEO_STREAM_CFG_COUNT <= i)
     {
-        ERROR("video stream[%d] is not configured !", id);
+        ERROR("video stream[%u,%u,%u] is not configured !", id.type, id.major, id.minor);
         return -1;
     }
+    stream_cfg = &video_stream_cfg[i];
 
     pthread_mutex_lock(&media_mutex);
-    if ((0 == media_inited) || (stream_state_list[id].is_running))
+    if (0 >= media_inited)
     {
-        ERROR("start stream[%d] failed, media_inited[%d] running[%d] !",
-               id, media_inited, stream_state_list[id].is_running);
         pthread_mutex_unlock(&media_mutex);
         return -1;
     }
-
-    stream_state_list[id].should_run = 1;
-    stream_state_list[id].is_running = 1;
+    for (i = 0; i < STREAM_COUNT; i++)
+    {
+        if (!memcmp(&id, &stream_state_list[i].stream_id, sizeof(stream_id_t)))
+            break;
+    }
+    if (stream_state_list[i].is_running)
+    {
+        if (stream_state_list[i].should_run)
+        {
+            pthread_mutex_unlock(&media_mutex);
+            return 0;
+        }
+        ERROR("stream[%u,%u,%u] is exiting, try again !", id.type, id.major, id.minor);
+        pthread_mutex_unlock(&media_mutex);
+        sleep(1);
+        return -1;
+    }
+    stream_state_list[i].should_run = 1;
+    stream_state_list[i].is_running = 1;
     pthread_mutex_unlock(&media_mutex);
 
-    pthread_create(&tid, NULL, get_video_stream, (void *)id);
+    pthread_create(&tid, NULL, get_video_stream, (void *)stream_cfg);
 
     return 0;
 }
 static int start_audio_stream(stream_id_t id)
 {
+    audio_stream_cfg_t *stream_cfg;
     pthread_t tid;
     int i;
 
 
     for (i = 0; i < AUDIO_STREAM_CFG_COUNT; i++)
     {
-        if (id == audio_stream_cfg[i].stream_info.stream_id)
+        if (!memcmp(&id, &audio_stream_cfg[i].stream_info.stream_id, sizeof(stream_id_t)))
             break;
     }
     if (AUDIO_STREAM_CFG_COUNT <= i)
     {
-        ERROR("audio stream[%d] is not configured !", id);
+        ERROR("audio stream[%u,%u,%u] is not configured !", id.type, id.major, id.minor);
         return -1;
     }
+    stream_cfg = &audio_stream_cfg[i];
 
     pthread_mutex_lock(&media_mutex);
-    if ((0 == media_inited) || (stream_state_list[id].is_running))
+    if (0 >= media_inited)
     {
-        ERROR("start stream[%d] failed, media_inited[%d] running[%d] !",
-               id, media_inited, stream_state_list[id].is_running);
         pthread_mutex_unlock(&media_mutex);
         return -1;
     }
-    stream_state_list[id].should_run = 1;
-    stream_state_list[id].is_running = 1;
+    for (i = 0; i < STREAM_COUNT; i++)
+    {
+        if (!memcmp(&id, &stream_state_list[i].stream_id, sizeof(stream_id_t)))
+            break;
+    }
+    if (stream_state_list[i].is_running)
+    {
+        if (stream_state_list[i].should_run)
+        {
+            pthread_mutex_unlock(&media_mutex);
+            return 0;
+        }
+        ERROR("stream[%u,%u,%u] is exiting, try again !", id.type, id.major, id.minor);
+        pthread_mutex_unlock(&media_mutex);
+        sleep(1);
+        return -1;
+    }
+    stream_state_list[i].should_run = 1;
+    stream_state_list[i].is_running = 1;
     pthread_mutex_unlock(&media_mutex);
 
-    pthread_create(&tid, NULL, get_audio_stream, (void *)id);
+    pthread_create(&tid, NULL, get_audio_stream, (void *)stream_cfg);
 
     return 0;
 }
 int hism_start_stream(stream_id_t id)
 {
-    if ((STREAM_ID_V_START <= id) && (STREAM_ID_V_MAX > id))
+    if (0 == id.type)
         return start_video_stream(id);
-    else if ((STREAM_ID_A_START <= id) && (STREAM_ID_A_MAX > id))
+    else if (1 == id.type)
         return start_audio_stream(id);
     else
         return -1;
 }
 int hism_stop_stream(stream_id_t id)
 {
-    if ((0 > id) || (STREAM_ID_MAX <= id))
-        return -1;
+    int i;
 
     pthread_mutex_lock(&media_mutex);
-    if (0 == stream_state_list[id].is_running)
+    if (0 >= media_inited)
     {
         pthread_mutex_unlock(&media_mutex);
         return -1;
     }
-    stream_state_list[id].should_run = 0;
+
+    for (i = 0; i < STREAM_COUNT; i++)
+    {
+        if (!memcmp(&id, &stream_state_list[i].stream_id, sizeof(stream_id_t)))
+            break;
+    }
+    if (STREAM_COUNT <= i)
+    {
+        pthread_mutex_unlock(&media_mutex);
+        return -1;
+    }
+    stream_state_list[i].should_run = 0;
     pthread_mutex_unlock(&media_mutex);
 
     return 0;
@@ -1784,7 +1882,7 @@ int hism_stop_isp_tool(void)
 }
 
 
-int hism_get_single_frame(single_frame_id_t id, single_frame_t *frame)
+int hism_get_single_frame(stream_id_t id, single_frame_t *frame)
 {
     int width;
     int height;
@@ -1792,24 +1890,23 @@ int hism_get_single_frame(single_frame_id_t id, single_frame_t *frame)
     IMPFrameInfo info;
     int i;
 
-    if ((0 == media_inited) || (NULL == frame))
+
+    if ((0 >= media_inited) || (NULL == frame))
         return -1;
 
     for (i = 0; i < SINGLE_FRAME_CFG_COUNT; i++)
     {
-        if (id != single_frame_cfg[i].frame_id)
-            continue;
-
-        width  = single_frame_cfg[i].width;
-        height = single_frame_cfg[i].height;
-        chn_id = single_frame_cfg[i].chn_id;
-        break;
+        if (!memcmp(&id, &single_frame_cfg[i].stream_id, sizeof(stream_id_t)))
+            break;
     }
     if (SINGLE_FRAME_CFG_COUNT <= i)
     {
-        ERROR("single frame[%d] is not configured !", id);
+        ERROR("single frame[%u,%u,%u] is not configured !", id.type, id.major, id.minor);
         return -1;
     }
+    width  = single_frame_cfg[i].width;
+    height = single_frame_cfg[i].height;
+    chn_id = single_frame_cfg[i].chn_id;
 
     frame->buf = malloc(width * height * 3 / 2);
     if (NULL == frame->buf)
@@ -1863,13 +1960,13 @@ int hism_write_osd(stream_id_t stream_id, osd_id_t osd_id, unsigned char *buf)
 {
     int i;
 
-    if ((0 == media_inited) || (NULL == buf))
+    if ((0 >= media_inited) || (NULL == buf))
         return -1;
 
     for (i = 0; i < OSD_REGION_CFG_COUNT; i++)
     {
-        if (   (stream_id == osd_region_cfg[i].stream_id)
-            && (   osd_id == osd_region_cfg[i].osd_id))
+        if (   (!memcmp(&stream_id, &osd_region_cfg[i].stream_id, sizeof(stream_id_t)))
+            && (osd_id == osd_region_cfg[i].osd_id))
             break;
     }
     if (OSD_REGION_CFG_COUNT <= i)
@@ -1888,12 +1985,13 @@ int hism_draw_rect(stream_id_t stream_id, const graphic_rel_rect_t *rect, unsign
     int i;
 
 
-    if (0 == media_inited)
+    if (0 >= media_inited)
         return -1;
 
     for (i = 0; i < OSD_GRP_CFG_COUNT; i++)
     {
-        if ((stream_id == osd_grp_cfg[i].stream_id) && osd_grp_cfg[i].rect_rgn_cnt)
+        if (   (!memcmp(&stream_id, &osd_grp_cfg[i].stream_id, sizeof(stream_id_t)))
+            && osd_grp_cfg[i].rect_rgn_cnt)
             break;
     }
     if (OSD_GRP_CFG_COUNT <= i)
@@ -1906,7 +2004,6 @@ int hism_draw_rect(stream_id_t stream_id, const graphic_rel_rect_t *rect, unsign
         {
             IMP_OSD_ShowRgn(cfg->rect_rgn_handles[i], cfg->grp, 0);
         }
-
         return 0;
     }
 
@@ -1917,15 +2014,13 @@ int hism_draw_rect(stream_id_t stream_id, const graphic_rel_rect_t *rect, unsign
 
     for (i = 0; i < VIDEO_STREAM_CFG_COUNT; i++)
     {
-        if (stream_id == video_stream_cfg[i].stream_info.stream_id)
-        {
-            w = video_stream_cfg[i].stream_info.width;
-            h = video_stream_cfg[i].stream_info.height;
+        if (!memcmp(&stream_id, &video_stream_cfg[i].stream_info.stream_id, sizeof(stream_id_t)))
             break;
-        }
     }
     if (VIDEO_STREAM_CFG_COUNT <= i)
         return -1;
+    w = video_stream_cfg[i].stream_info.width;
+    h = video_stream_cfg[i].stream_info.height;
 
     memset(&attr, 0, sizeof(attr));
     attr.type = OSD_REG_RECT;
@@ -1965,12 +2060,13 @@ int hism_draw_line(stream_id_t stream_id, const graphic_rel_rect_t *line, unsign
     int i;
 
 
-    if (0 == media_inited)
+    if (0 >= media_inited)
         return -1;
 
     for (i = 0; i < OSD_GRP_CFG_COUNT; i++)
     {
-        if ((stream_id == osd_grp_cfg[i].stream_id) && osd_grp_cfg[i].slash_rgn_cnt)
+        if (   (!memcmp(&stream_id, &osd_grp_cfg[i].stream_id, sizeof(stream_id_t)))
+            && osd_grp_cfg[i].slash_rgn_cnt)
             break;
     }
     if (OSD_GRP_CFG_COUNT <= i)
@@ -1994,15 +2090,13 @@ int hism_draw_line(stream_id_t stream_id, const graphic_rel_rect_t *line, unsign
 
     for (i = 0; i < VIDEO_STREAM_CFG_COUNT; i++)
     {
-        if (stream_id == video_stream_cfg[i].stream_info.stream_id)
-        {
-            w = video_stream_cfg[i].stream_info.width;
-            h = video_stream_cfg[i].stream_info.height;
+        if (!memcmp(&stream_id, &video_stream_cfg[i].stream_info.stream_id, sizeof(stream_id_t)))
             break;
-        }
     }
     if (VIDEO_STREAM_CFG_COUNT <= i)
         return -1;
+    w = video_stream_cfg[i].stream_info.width;
+    h = video_stream_cfg[i].stream_info.height;
 
     memset(&attr, 0, sizeof(attr));
     attr.type = OSD_REG_SLASH;
@@ -2043,7 +2137,7 @@ int hism_play_audio_frame(frame_t *frame)
     unsigned int size;
     unsigned char *p;
 
-    if ((NULL == frame) || (NULL == frame->buf))
+    if ((0 >= media_inited) || (NULL == frame) || (NULL == frame->buf))
         return -1;
 
     size = frame->size;
@@ -2081,7 +2175,7 @@ static int register_algo_cb(algo_id_t algo_id, void *cb)
         return -1;
 
     pthread_mutex_lock(&media_mutex);
-    if (0 == media_inited)
+    if (0 >= media_inited)
     {
         ERROR("media is not inited !");
         pthread_mutex_unlock(&media_mutex);
@@ -2097,9 +2191,9 @@ static int register_algo_cb(algo_id_t algo_id, void *cb)
             return 0;
         }
     }
+    ERROR("cb count exceeds the max(%u) !", MAX_ALGO_CB);
     pthread_mutex_unlock(&media_mutex);
 
-    ERROR("cb count exceeds the max(%u) !", MAX_ALGO_CB);
     return -1;
 }
 int hism_register_algo_motion_det_cb(algo_motion_det_cb_t cb)

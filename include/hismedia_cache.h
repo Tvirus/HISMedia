@@ -42,29 +42,20 @@ typedef enum
     AUDIO_FORMAT_MAX
 }audio_format_t;
 
-typedef enum
+typedef struct
 {
-    STREAM_ID_V_START = 0,
-    STREAM_ID_V_RGB_MAIN = STREAM_ID_V_START,
-    STREAM_ID_V_RGB_SUB1,
-    STREAM_ID_V_RGB_SUB2,
-    STREAM_ID_V_IR_MAIN,
-    STREAM_ID_V_IR_SUB1,
-    STREAM_ID_V_IR_SUB2,
-    STREAM_ID_V_MAX,
-    STREAM_ID_A_START = STREAM_ID_V_MAX,
-    STREAM_ID_A_MAIN = STREAM_ID_A_START,
-    STREAM_ID_A_SUB,
-    STREAM_ID_A_MAX,
-    STREAM_ID_MAX = STREAM_ID_A_MAX
+    unsigned char type; /* 0:视频，1:音频 */
+    unsigned char rsv;
+    unsigned char major; /* sensor、mic */
+    unsigned char minor; /* 子码流 */
 }stream_id_t;
 
 typedef struct
 {
     video_format_t format;
-    unsigned int fps;
     unsigned int width;
     unsigned int height;
+    unsigned int fps;
 }video_frame_info_t;
 
 typedef struct
@@ -77,7 +68,9 @@ typedef struct
 typedef struct
 {
     stream_id_t stream_id;
+    int cache_id;
     int ref_cnt;
+    //int rsv;
     unsigned long long pts;
     union
     {
@@ -91,14 +84,17 @@ typedef struct
 typedef int (*stream_cb_t)(frame_t *frame, void *arg);
 
 
-extern int hism_cache_init(void);
+extern int hism_cache_init(unsigned int max_stream_count);
+extern int hism_cache_exit(void);
+extern int hism_register_stream_id(stream_id_t id); /* 返回stream_cache_id */
 extern int hism_register_stream_cb(stream_id_t id, stream_cb_t cb, void **cb_handle, void *arg);
 extern int hism_delete_stream_cb(void *cb_handle);
 extern frame_t* hism_alloc_frame(unsigned int size);
-extern int hism_put_stream_frame(frame_t *frame); /* 返回失败后由调用者释放资源 */
+extern int hism_free_frame(frame_t *frame);
+extern int hism_put_stream_frame(frame_t *frame); /* 返回失败后由调用者释放*frame */
 extern int hism_release_stream_frame(frame_t *frame);
 
-extern void hism_print_cache_state(void);
+extern void hism_print_cache_status(void);
 
 
 #endif

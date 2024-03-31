@@ -697,12 +697,12 @@ static const region_attach_cfg_t region_attach_cfg[] =
 /*************************************************
     Video Stream Config
 **************************************************/
-static const video_stream_cfg_t video_stream_cfg[] =
+static video_stream_cfg_t video_stream_cfg[] =
 {
-    /*           stream_id             format  width  height  fps   venc_chn */
-    {{STREAM_ID_V_RGB_MAIN, VIDEO_FORMAT_H265,  2688,   1520,  30},        0  },
-    {{STREAM_ID_V_RGB_SUB1, VIDEO_FORMAT_H265,  1920,   1080,  30},        1  },
-    {{STREAM_ID_V_RGB_SUB2, VIDEO_FORMAT_H265,   640,    360,  30},        2  }
+    /*  stream_id              format  width  height  fps   cache_id  venc_chn */
+    {{{0, 0, 0, 0}, VIDEO_FORMAT_H265,  2688,   1520,  30},       -1,        0  },
+    {{{0, 0, 0, 1}, VIDEO_FORMAT_H265,  1920,   1080,  30},       -1,        1  },
+    {{{0, 0, 0, 2}, VIDEO_FORMAT_H265,   640,    360,  30},       -1,        2  }
 };
 #define VIDEO_STREAM_CFG_COUNT (sizeof(video_stream_cfg) / sizeof(video_stream_cfg[0]))
 
@@ -712,12 +712,15 @@ static const video_stream_cfg_t video_stream_cfg[] =
 /*************************************************
     Audio Stream Config
 **************************************************/
-static const audio_stream_cfg_t audio_stream_cfg[] =
+static audio_stream_cfg_t audio_stream_cfg[] =
 {
-    /*       stream_id            format  chns  rate   ai_dev  ai_chn */
-    {{STREAM_ID_A_MAIN, AUDIO_FORMAT_PCM,    1, 8000},      0,      0  }
+    /*  stream_id             format  chns  rate   cache_id  ai_dev  ai_chn */
+    {{{1, 0, 0, 0}, AUDIO_FORMAT_PCM,    1, 8000},       -1,      0,      0  }
 };
 #define AUDIO_STREAM_CFG_COUNT (sizeof(audio_stream_cfg) / sizeof(audio_stream_cfg[0]))
+
+
+#define STREAM_COUNT (VIDEO_STREAM_CFG_COUNT + AUDIO_STREAM_CFG_COUNT)
 
 
 
@@ -727,8 +730,8 @@ static const audio_stream_cfg_t audio_stream_cfg[] =
 **************************************************/
 static const osd_cfg_t osd_cfg[] =
 {
-    /*           stream_id       osd_id           format    w   h  handle                 pixel_format    w   h  data */
-    {{STREAM_ID_V_RGB_MAIN, OSD_ID_TIME, OSD_FORMAT_BIT2, 320, 32},     0, {OT_PIXEL_FORMAT_ARGB_CLUT2, 320, 32, NULL }}
+    /*  stream_id        osd_id           format    w   h  handle                 pixel_format    w   h  data */
+    {{{0, 0, 0, 0}, OSD_ID_TIME, OSD_FORMAT_BIT2, 320, 32},     0, {OT_PIXEL_FORMAT_ARGB_CLUT2, 320, 32, NULL }}
 };
 #define OSD_CFG_COUNT (sizeof(osd_cfg) / sizeof(osd_cfg[0]))
 

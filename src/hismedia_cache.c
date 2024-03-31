@@ -1,6 +1,7 @@
 #include "hismedia_cache.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
@@ -27,9 +28,10 @@
 typedef struct
 {
     stream_id_t stream_id;
-    int should_run;
+    int cache_id;
     stream_cb_t cb; /* 用来判断是否在用 */
     void *cb_arg;
+    int should_run;
     unsigned int head;
     unsigned int tail; /* 永远指向空节点 */
     frame_t* ring_buf[MAX_CACHE_CNT];
@@ -37,63 +39,172 @@ typedef struct
 
 typedef struct
 {
-    pthread_spinlock_t spin;
-    pthread_mutex_t mutex;
+    stream_id_t stream_id;
+    int used;
+    pthread_spinlock_t spin; /* 除receive_stream外，锁定前先拥有media_cache_mutex */
+    pthread_mutex_t mutex; /* 条件变量用 */
     pthread_cond_t cond;
     int cb_cnt;
     stream_cb_info_t cb_info[MAX_CALLBACK_CNT];
 }stream_cache_t;
 
 
-static stream_cache_t stream_cache_list[STREAM_ID_MAX];
+extern unsigned char media_debug;
+static unsigned int stream_count = 0;
+static stream_cache_t *stream_cache_list = NULL;
 static pthread_mutex_t media_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int media_cache_inited = 0;
+static int media_cache_inited = 0; /* -1:退出失败，0:未初始化，1:已初始化 */
 
 
 
 
-int hism_cache_init(void)
+int hism_cache_init(unsigned int max_stream_count)
 {
-    int i;
     pthread_condattr_t attr;
+    int i;
 
+
+    if (0 == max_stream_count)
+        return -1;
 
     pthread_mutex_lock(&media_cache_mutex);
-    if (media_cache_inited)
+
+    if (0 != media_cache_inited)
     {
         pthread_mutex_unlock(&media_cache_mutex);
-        return 0;
+        return -1;
     }
+    stream_cache_list = calloc(max_stream_count, sizeof(stream_cache_t));
+    if (NULL == stream_cache_list)
+    {
+        ERROR("Failed to calloc %zu !", sizeof(stream_cache_t) * max_stream_count);
+        return -1;
+    }
+    stream_count = max_stream_count;
 
-    memset(stream_cache_list, 0, sizeof(stream_cache_list));
     pthread_condattr_init(&attr);
     pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
-    for (i = 0; i < STREAM_ID_MAX; i++)
+    for (i = 0; i < max_stream_count; i++)
     {
         pthread_spin_init(&stream_cache_list[i].spin, PTHREAD_PROCESS_PRIVATE);
         pthread_mutex_init(&stream_cache_list[i].mutex, NULL);
         pthread_cond_init(&stream_cache_list[i].cond, &attr);
     }
     pthread_condattr_destroy(&attr);
-
     media_cache_inited = 1;
+
     pthread_mutex_unlock(&media_cache_mutex);
+
     return 0;
 }
-/*
-没有必要退出。
-同时因为注册、放入流等过程中没用media_cache_mutex，所以没法保证资源释放后不再使用
-int hism_cache_deinit(void)
+
+int hism_cache_exit(void)
 {
+    int i, j, t;
+    int ret;
+
+
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited)
+    {
+        ret = media_cache_inited;
+        pthread_mutex_unlock(&media_cache_mutex);
+        return ret;
+    }
+
+    for (i = 0; i < stream_count; i++)
+    {
+        if (!stream_cache_list[i].used)
+            continue;
+
+        pthread_spin_lock(&stream_cache_list[i].spin);
+        for (j = 0; j < MAX_CALLBACK_CNT; j++)
+        {
+            if (NULL == stream_cache_list[i].cb_info[j].cb)
+                continue;
+            stream_cache_list[i].cb_info[j].should_run = 0;
+        }
+        pthread_spin_unlock(&stream_cache_list[i].spin);
+
+    }
+    for (t = 0; t < 40; t++)
+    {
+        usleep(300 * 1000);
+        for (i = 0; i < stream_count; i++)
+        {
+            if (!stream_cache_list[i].used)
+                continue;
+            for (j = 0; j < MAX_CALLBACK_CNT; j++)
+            {
+                if (stream_cache_list[i].cb_info[j].cb)
+                    break;
+            }
+            if (MAX_CALLBACK_CNT > j)
+                break;
+        }
+        if (stream_count <= i)
+            break;
+    }
+    if (40 <= t)
+    {
+        ERROR("media cache exit timeout !");
+        media_cache_inited = -1;
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+
+    for (i = 0; i < stream_count; i++)
+    {
+        pthread_spin_destroy(&stream_cache_list[i].spin);
+        pthread_mutex_destroy(&stream_cache_list[i].mutex);
+        pthread_cond_destroy(&stream_cache_list[i].cond);
+    }
+    free(stream_cache_list);
+    stream_cache_list = NULL;
+    media_cache_inited = 0;
+
+    pthread_mutex_unlock(&media_cache_mutex);
+
     return 0;
 }
-*/
+
+
+/* 返回stream_cache_id */
+int hism_register_stream_id(stream_id_t id)
+{
+    int i;
+
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+
+    for (i = 0; i < stream_count; i++)
+    {
+        if (    (!stream_cache_list[i].used)
+             || (!memcmp(&id, &stream_cache_list[i].stream_id, sizeof(stream_id_t))))
+        {
+            stream_cache_list[i].stream_id = id;
+            stream_cache_list[i].used = 1;
+            pthread_mutex_unlock(&media_cache_mutex);
+            return i;
+        }
+    }
+
+    pthread_mutex_unlock(&media_cache_mutex);
+
+    return -1;
+}
 
 
 #define COND_TIMEOUT 1
 static void* receive_stream(void *arg)
 {
-    stream_cb_info_t *cb_info;
+    stream_cb_info_t *cb_info = (stream_cb_info_t *)arg;
     unsigned int *head;
     unsigned int *tail;
     stream_cache_t *stream;
@@ -103,12 +214,11 @@ static void* receive_stream(void *arg)
     pthread_detach(pthread_self());
     prctl(PR_SET_NAME, (unsigned long)"receive_stream");
 
-    if (NULL == arg)
+    if (NULL == cb_info)
         return NULL;
-    cb_info = (stream_cb_info_t *)arg;
     head = &cb_info->head;
     tail = &cb_info->tail;
-    stream = &stream_cache_list[cb_info->stream_id];
+    stream = &stream_cache_list[cb_info->cache_id];
 
     while (cb_info->should_run)
     {
@@ -134,7 +244,7 @@ static void* receive_stream(void *arg)
     {
         cb_info->ring_buf[*head]->ref_cnt--;
         if (0 == cb_info->ring_buf[*head]->ref_cnt)
-            free(cb_info->ring_buf[*head]);
+            hism_free_frame(cb_info->ring_buf[*head]);
 
         (*head)++;
         if (MAX_CACHE_CNT <= *head)
@@ -146,20 +256,42 @@ static void* receive_stream(void *arg)
 
     return NULL;
 }
+
 int hism_register_stream_cb(stream_id_t id, stream_cb_t cb, void **cb_handle, void *arg)
 {
     stream_cache_t *stream;
     stream_cb_info_t *cb_info;
     pthread_t tid;
-    int i;
+    int i, cache_id;
 
-    if (0 > id || STREAM_ID_MAX <= id)
-        return -1;
+
     if (NULL == cb || NULL == cb_handle)
         return -1;
 
-    stream = &stream_cache_list[id];
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+
+    for (i = 0; i < stream_count; i++)
+    {
+        if (   stream_cache_list[i].used
+            && !memcmp(&id, &stream_cache_list[i].stream_id, sizeof(stream_id_t)))
+            break;
+    }
+    if (stream_count <= i)
+    {
+        ERROR("stream[%u,%u,%u] is not registered !", id.type, id.major, id.minor);
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+    cache_id = i;
+    stream = &stream_cache_list[i];
     pthread_spin_lock(&stream->spin);
+    pthread_mutex_unlock(&media_cache_mutex);
 
     for (i = 0; i < MAX_CALLBACK_CNT; i++)
     {
@@ -168,14 +300,15 @@ int hism_register_stream_cb(stream_id_t id, stream_cb_t cb, void **cb_handle, vo
     }
     if (MAX_CALLBACK_CNT <= i)
     {
+        ERROR("stream[%u,%u,%u] callback is full, max:%u !", id.type, id.major, id.minor, MAX_CALLBACK_CNT);
         pthread_spin_unlock(&stream->spin);
-        ERROR("stream[%d] callback is full, max:%u !", id, MAX_CALLBACK_CNT);
         return -1;
     }
-
     cb_info = &stream->cb_info[i];
-    cb_info->should_run = 1;
+    cb_info->stream_id = id;
+    cb_info->cache_id = cache_id;
     cb_info->cb_arg = arg;
+    cb_info->should_run = 1;
     cb_info->head = 0;
     cb_info->tail = 0;
     cb_info->cb = cb;
@@ -189,22 +322,36 @@ int hism_register_stream_cb(stream_id_t id, stream_cb_t cb, void **cb_handle, vo
     return 0;
 }
 
-/* 无法彻底防止重复释放 */
 int hism_delete_stream_cb(void *cb_handle)
 {
-    stream_cb_info_t *cb_info;
+    stream_cb_info_t *cb_info = (stream_cb_info_t *)cb_handle;
     stream_cache_t *stream;
 
 
-    if (NULL == cb_handle)
+    if (NULL == cb_info)
         return -1;
 
-    cb_info = (stream_cb_info_t *)cb_handle;
-    if ((0 > cb_info->stream_id) || (STREAM_ID_MAX <= cb_info->stream_id))
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
         return -1;
-    stream = &stream_cache_list[cb_info->stream_id];
+    }
+    if ((0 > cb_info->cache_id) || (stream_count <= cb_info->cache_id))
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+    stream = &stream_cache_list[cb_info->cache_id];
+    if ((!stream->used) || memcmp(&stream->stream_id, &cb_info->stream_id, sizeof(stream_id_t)))
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
 
     pthread_spin_lock(&stream->spin);
+    pthread_mutex_unlock(&media_cache_mutex);
     if (NULL == cb_info->cb)
     {
         pthread_spin_unlock(&stream->spin);
@@ -224,6 +371,15 @@ frame_t* hism_alloc_frame(unsigned int size)
 
     return (frame_t *)malloc(sizeof(frame_t) + size);
 }
+int hism_free_frame(frame_t *frame)
+{
+    if (NULL == frame)
+        return -1;
+
+    free(frame);
+
+    return 0;
+}
 
 
 /* 返回失败后由调用者释放资源 */
@@ -233,36 +389,51 @@ int hism_put_stream_frame(frame_t *frame)
     stream_cb_info_t *cb_info;
     unsigned int head;
     unsigned int *tail;
-    int i;
+    int i, cb_cnt;
 
 
     if (NULL == frame)
         return -1;
-    if (0 > frame->stream_id || STREAM_ID_MAX <= frame->stream_id)
-        return -1;
 
-    stream = &stream_cache_list[frame->stream_id];
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited || 0 > frame->cache_id || stream_count <= frame->cache_id)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+    stream = &stream_cache_list[frame->cache_id];
+    if (memcmp(&stream->stream_id, &frame->stream_id, sizeof(stream_id_t)))
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+
     pthread_spin_lock(&stream->spin);
+    pthread_mutex_unlock(&media_cache_mutex);
 
     if (0 == stream->cb_cnt)
     {
         pthread_spin_unlock(&stream->spin);
-        free(frame);
+        hism_free_frame(frame);
         return 0;
     }
 
     frame->ref_cnt = 0;
-    for (i = 0; i < MAX_CALLBACK_CNT && frame->ref_cnt < stream->cb_cnt; i++)
+    cb_cnt = 0;
+    for (i = 0; i < MAX_CALLBACK_CNT && cb_cnt < stream->cb_cnt; i++)
     {
         cb_info = &stream->cb_info[i];
         if (NULL == cb_info->cb)
             continue;
+        cb_cnt++;
 
         head = cb_info->head;
         tail = &cb_info->tail;
         if (((*tail) + 1 == head) || ((0 == head) && (MAX_CACHE_CNT - 1 == *tail)))
         {
-            //ERROR("stream[%d] cb[%d] is blocked !", frame->stream_id, i);
+            //ERROR("stream[%u,%u,%u] cb[%d] is blocked !",
+                     //frame->stream_id.type, frame->stream_id.major, frame->stream_id.minor, i);
             continue;
         }
 
@@ -275,8 +446,8 @@ int hism_put_stream_frame(frame_t *frame)
     }
     if (0 == frame->ref_cnt)
     {
+        hism_free_frame(frame);
         pthread_spin_unlock(&stream->spin);
-        free(frame);
         return 0;
     }
 
@@ -294,22 +465,33 @@ int hism_release_stream_frame(frame_t *frame)
 
     if (NULL == frame)
         return -1;
-    if ((0 > frame->stream_id) || (STREAM_ID_MAX <= frame->stream_id))
-        return -1;
 
-    stream = &stream_cache_list[frame->stream_id];
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited || 0 > frame->cache_id || stream_count <= frame->cache_id)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
+    stream = &stream_cache_list[frame->cache_id];
+    if (memcmp(&stream->stream_id, &frame->stream_id, sizeof(stream_id_t)))
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return -1;
+    }
 
     pthread_spin_lock(&stream->spin);
+    pthread_mutex_unlock(&media_cache_mutex);
     frame->ref_cnt--;
     if (0 == frame->ref_cnt)
-        free(frame);
+        hism_free_frame(frame);
     pthread_spin_unlock(&stream->spin);
 
     return 0;
 }
 
 
-void hism_print_cache_state(void)
+void hism_print_cache_status(void)
 {
     stream_cache_t *stream;
     stream_cb_info_t *cb_info;
@@ -317,13 +499,22 @@ void hism_print_cache_state(void)
     int i, j;
 
 
-    for (i = 0; i < STREAM_ID_MAX; i++)
+    pthread_mutex_lock(&media_cache_mutex);
+
+    if (0 >= media_cache_inited)
+    {
+        pthread_mutex_unlock(&media_cache_mutex);
+        return;
+    }
+
+    for (i = 0; i < stream_count; i++)
     {
         stream = &stream_cache_list[i];
-        if (0 == stream->cb_cnt)
+        if ((!stream->used) || (0 == stream->cb_cnt))
             continue;
 
-        printf("========== stream[%d] cache state ========\n", i);
+        printf("========== stream[%u,%u,%u] cache status ========\n",
+                stream->stream_id.type, stream->stream_id.major, stream->stream_id.minor);
         pthread_spin_lock(&stream->spin);
         for (j = 0; j < MAX_CALLBACK_CNT; j++)
         {
